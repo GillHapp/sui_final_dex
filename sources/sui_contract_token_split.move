@@ -12,6 +12,7 @@ use sui::sui::SUI;
 
 const E_INSUFFICIENT_BALANCE: u64 = 0;
 const E_INVALID_RATIO: u64 = 1;
+const E_DIVISION_BY_ZERO: u64 = 2;
 
 public struct SUI_CONTRACT_TOKEN_SPLIT has drop {}
 
@@ -69,27 +70,86 @@ public entry fun provide_liquidity(
     let sui_amt = coin::value(&sui);
     let happy_amt = coin::value(&happy);
 
-    // Require the user to send at least 1 SUI and 100 HAPPY
-    if (sui_amt < 1000000000 || happy_amt < 10000) {
+    // Require the user to send at least 1 SUI and 200 HAPPY
+    if (sui_amt < 1_000_000_000 || happy_amt < 200_000_000_000) {
         abort E_INVALID_RATIO;
     };
 
-    // Split out 1 SUI and 100 HAPPY
-    let one_sui = coin::split(&mut sui, 1000000000, ctx);
-    let hundred_happy = coin::split(&mut happy, 100000000000, ctx);
+    // Split out exactly 1 SUI and 200 HAPPY
+    let one_sui = coin::split(&mut sui, 1_000_000_000, ctx);
+    let two_hundred_happy = coin::split(&mut happy, 200_000_000_000, ctx);
 
     // Create the pool
     let pool = LiquidityPool {
         id: new(ctx),
         sui_reserve: one_sui,
-        happy_reserve: hundred_happy,
+        happy_reserve: two_hundred_happy,
     };
 
-    // Return the remaining SUI and HAPPY to user
+    // Return the remaining SUI and HAPPY back to the user
     public_transfer(sui, sender(ctx));
     public_transfer(happy, sender(ctx));
     public_transfer(pool, sender(ctx));
 }
+
+
+
+public entry fun calculate_price(
+    pool: &LiquidityPool,
+    sui_amount: u64
+): u64 {
+    let happy_reserve = coin::value(&pool.happy_reserve);
+    let sui_reserve = coin::value(&pool.sui_reserve);
+
+    // Check pool not empty
+    if (sui_reserve == 0) {
+        abort E_DIVISION_BY_ZERO;
+    };
+
+    let price_per_sui = happy_reserve / sui_reserve;
+    sui_amount * price_per_sui
+}
+
+
+public entry fun swap_sui_to_happy(
+    pool: &mut LiquidityPool,
+    mut sui_payment: Coin<SUI>,
+    value: u64,
+    ctx: &mut TxContext
+) {
+    // Split the amount user wants to swap
+    let new_sui = coin::split(&mut sui_payment, value, ctx);
+
+    // Calculate how much HAPPY to give
+    let happy_amt = calculate_price(pool, value);
+
+    // Check if the pool has enough HAPPY tokens
+    if (happy_amt > coin::value(&pool.happy_reserve)) {
+        abort E_INSUFFICIENT_BALANCE;
+    };
+
+    // Split the required amount of HAPPY tokens from the pool
+    let new_happy = coin::split(&mut pool.happy_reserve, happy_amt, ctx);
+
+    // ✅ Only `new_sui` should be joined into the pool
+    coin::join(&mut pool.sui_reserve, new_sui);
+
+    // ✅ Transfer HAPPY tokens to the sender
+    public_transfer(new_happy, sender(ctx));
+
+    // ✅ Return leftover SUI (if any) back to the sender
+    public_transfer(sui_payment, sender(ctx));
+}
+
+public entry fun burn(
+    minter_cap: &mut MinterCap,
+    coin: Coin<SUI_CONTRACT_TOKEN_SPLIT>
+) {
+    coin::burn(&mut minter_cap.treasury_cap, coin);
+}
+}
+
+
 
 // now we want that when user come to the marketplace, 
 // this function is realated to user can swap there native sui token to happy token
@@ -116,41 +176,32 @@ public entry fun provide_liquidity(
 // }
 
 
-public entry fun swap(
-    pool: &mut LiquidityPool,
-    mut sui_payment: Coin<SUI>,
-    value: u64,
-    ctx: &mut TxContext
-) {
-   // split the sui payment in to value
-    let new_sui = coin::split(&mut sui_payment, value, ctx);
+// public entry fun swap(
+//     pool: &mut LiquidityPool,
+//     mut sui_payment: Coin<SUI>,
+//     value: u64,
+//     ctx: &mut TxContext
+// ) {
+//    // split the sui payment in to value
+//     let new_sui = coin::split(&mut sui_payment, value, ctx);
 
-    // Calculate the amount of HAPPY to swap
-    let happy_amt = value * coin::value(&pool.happy_reserve) / coin::value(&pool.sui_reserve);
+//     // Calculate the amount of HAPPY to swap
+//     let happy_amt = value * coin::value(&pool.happy_reserve) / coin::value(&pool.sui_reserve);
 
-    // Check if the pool has enough HAPPY to swap
-    if (happy_amt > coin::value(&pool.happy_reserve)) {
-        abort E_INSUFFICIENT_BALANCE;
-    };
+//     // Check if the pool has enough HAPPY to swap
+//     if (happy_amt > coin::value(&pool.happy_reserve)) {
+//         abort E_INSUFFICIENT_BALANCE;
+//     };
 
-    // Split the HAPPY coins
-    let new_happy = coin::split(&mut pool.happy_reserve, happy_amt, ctx);
+//     // Split the HAPPY coins
+//     let new_happy = coin::split(&mut pool.happy_reserve, happy_amt, ctx);
 
-    // transfer new coins to the user 
-    public_transfer(new_sui, sender(ctx));
-    // join the payment to the pool's reserve
-    coin::join(&mut pool.sui_reserve, sui_payment);
-    // transfer happy tokens to the user
-    public_transfer(new_happy, sender(ctx));
-}
-
-
+//     // transfer new coins to the user 
+//     public_transfer(new_sui, sender(ctx));
+//     // join the payment to the pool's reserve
+//     coin::join(&mut pool.sui_reserve, sui_payment);
+//     // transfer happy tokens to the user
+//     public_transfer(new_happy, sender(ctx));
+// }
 
 
-public entry fun burn(
-    minter_cap: &mut MinterCap,
-    coin: Coin<SUI_CONTRACT_TOKEN_SPLIT>
-) {
-    coin::burn(&mut minter_cap.treasury_cap, coin);
-}
-}
