@@ -93,98 +93,53 @@ public entry fun mint(
     public_transfer(new_coin, recipient)
 }
 
+ public entry fun init_pool(ctx: &mut TxContext) {
+        let pool = LiquidityPool {
+            id: object::new(ctx),
+            sui_reserve: coin::zero<SUI>(ctx),
+            happy_reserve: coin::zero<SUI_CONTRACT_TOKEN_SPLIT>(ctx),
+        };
+        transfer::public_share_object(pool);
+    }
+
+    public entry fun provide_liquidity(
+        pool: &mut LiquidityPool,
+        mut sui: Coin<SUI>,
+        mut happy: Coin<SUI_CONTRACT_TOKEN_SPLIT>,
+        value: u64,
+        ctx: &mut TxContext
+    ) {
+        let sui_balance = coin::value(&sui);
+        let happy_balance = coin::value(&happy);
+        
+        // Calculate required HAPPY based on 1:200 ratio
+        let happy_required = value * 200;
+        
+        // Validate balances and ratio
+        assert!(sui_balance >= value, E_INSUFFICIENT_BALANCE);
+        assert!(happy_balance >= happy_required, E_INSUFFICIENT_BALANCE);
+
+        // Split and add liquidity to pool
+        let sui_for_pool = coin::split(&mut sui, value, ctx);
+        let happy_for_pool = coin::split(&mut happy, happy_required, ctx);
+        
+        coin::join(&mut pool.sui_reserve, sui_for_pool);
+        coin::join(&mut pool.happy_reserve, happy_for_pool);
+
+        // Return leftover tokens
+        public_transfer(sui, sender(ctx));
+        public_transfer(happy, sender(ctx));
+    }
+
 // public entry fun provide_liquidity(
 //     mut sui: Coin<SUI>,
 //     mut happy: Coin<SUI_CONTRACT_TOKEN_SPLIT>,
+//     vault: &mut LiquidityTokenVault, // central vault holding all LP tokens
+//     value: u64,
 //     ctx: &mut TxContext
 // ) {
-//     let sui_amt = coin::value(&sui);
-//     let happy_amt = coin::value(&happy);
-
-//     // Require the user to send at least 1 SUI and 200 HAPPY
-//     if (sui_amt < 1_000_000_000 || happy_amt < 200_000_000_000) {
-//         abort E_INVALID_RATIO;
-//     };
-
-//     // Spli  t out exactly 1 SUI and 200 HAPPY
-//     let one_sui = coin::split(&mut sui, 1_000_000_000, ctx);
-//     let two_hundred_happy = coin::split(&mut happy, 200_000_000_000, ctx);
-
-//     // Create the pool
-//     let pool = LiquidityPool {
-//         id: new(ctx),
-//         sui_reserve: one_sui,
-//         happy_reserve: two_hundred_happy,
-//     };
-
-//     // Return the remaining SUI and HAPPY back to the user
-//     public_transfer(sui, sender(ctx));
-//     public_transfer(happy, sender(ctx));
-//     public_transfer(pool, sender(ctx));
+//     //
 // }
-public entry fun provide_liquidity(
-    mut sui: Coin<SUI>,
-    mut happy: Coin<SUI_CONTRACT_TOKEN_SPLIT>,
-    mut lp_token_supply: Coin<LP_TOKEN>, // Pre-minted LP tokens
-    value: u64,
-    ctx: &mut TxContext
-) {
-    let sui_amt = coin::value(&sui); // in base units
-    // now i want to split the native coin of sui 
-    let sent_sui = coin::split(&mut sui, value, ctx);
-    let sent_sui_value = coin::value(&sent_sui);
-    coin::join(&mut sui, sent_sui); // Join back the split coin
-    let happy_amt = coin::value(&happy); // in base units
-    //get the value 
-    let sui_unit = (1_000_000_000 * sent_sui_value);
-    let happy_per_sui = 200_000_000_000;
-
-    let sui_units = sui_amt / sui_unit;
-    let happy_units = happy_amt / happy_per_sui;
-
-    // Take the minimum matching pair amount (to maintain ratio)
-    let matched_units = if (sui_units < happy_units) { sui_units } else { happy_units };
-
-    if (matched_units == 0) {
-        abort E_INVALID_RATIO;
-    };
-
-    let total_sui_needed = matched_units * sui_unit;
-    let total_happy_needed = matched_units * happy_per_sui;
-
-    // Split tokens for pool deposit
-    let sui_for_pool = coin::split(&mut sui, total_sui_needed, ctx);
-    let happy_for_pool = coin::split(&mut happy, total_happy_needed, ctx);
-
-    // ✅ Create Pool object
-    let pool = LiquidityPool {
-        id: new(ctx),
-        sui_reserve: sui_for_pool,
-        happy_reserve: happy_for_pool,
-    };
-
-    // ✅ Track LP contribution
-    let lp_provider = LPProvider {
-        id: new(ctx),
-        provider: sender(ctx),
-        sui_amount: total_sui_needed,
-        happy_amount: total_happy_needed,
-    };
-
-    // ✅ Transfer LP tokens to user (equal to SUI units * 1_000_000_000)
-    let lp_tokens_to_send = matched_units * sui_unit;
-    let lp_tokens = coin::split(&mut lp_token_supply, lp_tokens_to_send, ctx);
-    public_transfer(lp_tokens, sender(ctx));
-
-    // ✅ Transfer Pool, LPProvider objects to sender
-    public_transfer(pool, sender(ctx));
-    public_transfer(lp_provider, sender(ctx));
-
-    // ✅ Refund leftover tokens
-    public_transfer(sui, sender(ctx));   // Remaining SUI
-    public_transfer(happy, sender(ctx)); // Remaining HAPPY
-    public_transfer(lp_token_supply, sender(ctx)); // Remaining LP tokens
-}
 
 
 
