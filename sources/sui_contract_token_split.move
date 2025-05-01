@@ -107,6 +107,7 @@ public entry fun mint(
         mut sui: Coin<SUI>,
         mut happy: Coin<SUI_CONTRACT_TOKEN_SPLIT>,
         value: u64,
+        tokenVault: &mut LiquidityTokenVault,
         ctx: &mut TxContext
     ) {
         let sui_balance = coin::value(&sui);
@@ -126,7 +127,34 @@ public entry fun mint(
         coin::join(&mut pool.sui_reserve, sui_for_pool);
         coin::join(&mut pool.happy_reserve, happy_for_pool);
 
-        // Return leftover tokens
+        // update the pool with LP provider native and custom token in LPProvider 
+        let lp_provider = LPProvider {
+            id: object::new(ctx),
+            provider: sender(ctx),
+            sui_amount: value,
+            happy_amount: happy_required,
+        };
+        // share the LP provider object
+        transfer::public_share_object(lp_provider);
+
+    // calcaulate tokal sui native token in in the pool 
+    let total_sui = coin::value(&pool.sui_reserve);
+    // calculate the sender native token in the pool
+    let sui_for_pool1 = coin::split(&mut sui, value, ctx);
+
+    let sender_sui = coin::value(&sui_for_pool1);
+    // calcualte the percentage of the sender token in the pool
+    // convert the percecnte to the round number this (sender_sui * 100) / total_sui; into round number 
+    let sender_percentage = (sender_sui * 100) / total_sui;
+    // get the LP token from the pool and calculate the equivalent LP token for the sender
+    let lp_token = coin::split(&mut tokenVault.lp_tokens, sender_percentage, ctx);
+    // transfer the LP token to the sender
+    public_transfer(lp_token, sender(ctx));
+    
+    // Join sui_for_pool1 back to the pool
+    coin::join(&mut pool.sui_reserve, sui_for_pool1);
+
+    // Return leftover tokens
         public_transfer(sui, sender(ctx));
         public_transfer(happy, sender(ctx));
     }
